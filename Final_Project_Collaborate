@@ -1486,3 +1486,340 @@ with engine.connect() as con:
 results
 
 write_query_to_file(QUERY_6, QUERY_6_FILENAME)
+
+# Part 4: Visualizing the Data
+# 4.1 Visualization 1: The most popular hour to take a taxi ( In this visualization, we have total trip data for each hour of a day information. We thinks it is better to use the bar chart)
+
+def plot_visual_1(dataframe):
+    
+    figure, axes = plt.subplots(figsize=(20, 10))
+
+    # Extract values for plotting
+    hours = dataframe['hour']
+    rides = dataframe['ride_count']
+
+    # Bar plot for visualizing hourly ride popularity
+    axes.bar(hours, rides, color='orange', alpha=0.7)
+    
+    # Add titles and labels
+    axes.set_title("Popularity of Yellow Taxi Rides by Hour (01-2020 to 08-2024)", fontsize=16)
+    axes.set_xlabel("Hour of Day", fontsize=14)
+    axes.set_ylabel("Number of Rides", fontsize=14)
+    axes.set_xticks(range(24))  # Ensure all hours are labeled
+    axes.set_xticklabels([f"{hour}:00" for hour in range(24)], rotation=45)
+
+    # Show plot
+    plt.tight_layout()
+    plt.show()
+def get_data_for_visual_1():
+    dataframe = pd.read_sql(QUERY_1, con=engine)
+    return dataframe
+dataframe.head()
+some_dataframe = get_data_for_visual_1()
+plot_visual_1(some_dataframe)
+4.2 Visualization 2: The Most Popular month to hire a cab or Uber (We think it is better to use Bar chart with 90% confidence interval for this visualization)
+
+def get_data_for_visual_2(engine):
+    query = """
+    SELECT
+        strftime('%Y-%m', pickup_datetime) AS year_month,   
+        SUM(trip_distance) / COUNT(*) AS avg_trip_distance   
+    FROM
+        (SELECT pickup_datetime, trip_distance FROM taxi_trips
+         UNION ALL
+         SELECT pickup_datetime, trip_distance FROM uber_trips) AS combined_trips
+    WHERE
+        pickup_datetime BETWEEN '2020-01-01' AND '2024-08-31'  
+    GROUP BY
+        strftime('%Y-%m', pickup_datetime)  -- Group by Year-Month
+    ORDER BY
+        year_month; 
+    """
+    # Fetch the data as a DataFrame
+    dataframe = pd.read_sql(query, con=engine)
+    return dataframe
+
+def plot_visual_2(dataframe):
+    # Add a 'Month' column (ignoring year)
+    dataframe['Month'] = pd.to_datetime(dataframe['year_month']).dt.month_name()
+
+    # Group by month and calculate statistics
+    grouped = dataframe.groupby('Month').agg(
+        mean_distance=('avg_trip_distance', 'mean'),
+        std_distance=('avg_trip_distance', 'std'),
+        count=('avg_trip_distance', 'count')
+    ).reset_index()
+
+    # Sort months in calendar order
+    grouped['Month'] = pd.Categorical(
+        grouped['Month'],
+        categories=[
+            "January", "February", "March", "April", "May", "June", 
+            "July", "August", "September", "October", "November", "December"
+        ],
+        ordered=True
+    )
+    grouped = grouped.sort_values('Month')
+
+    # Calculate 90% confidence intervals
+    z = norm.ppf(0.95)  # z-score for 90% confidence
+    grouped['ci_lower'] = grouped['mean_distance'] - z * (grouped['std_distance'] / grouped['count']**0.5)
+    grouped['ci_upper'] = grouped['mean_distance'] + z * (grouped['std_distance'] / grouped['count']**0.5)
+
+    # Visualization
+    plt.figure(figsize=(12, 6))
+    sns.barplot(
+        data=grouped,
+        x='Month',
+        y='mean_distance',
+        ci=None,
+        color='skyblue'
+    )
+
+    # Add error bars for confidence intervals
+    plt.errorbar(
+        grouped['Month'],
+        grouped['mean_distance'],
+        yerr=[grouped['mean_distance'] - grouped['ci_lower'], grouped['ci_upper'] - grouped['mean_distance']],
+        fmt='none',
+        ecolor='black',
+        capsize=5
+    )
+
+    # Add labels and title
+    plt.title('Average Trip Distance per Month (2020-2024)', fontsize=16)
+    plt.xlabel('Month', fontsize=14)
+    plt.ylabel('Average Distance (miles)', fontsize=14)
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+
+    # Show plot
+    plt.show()
+
+data = get_data_for_visual_2(engine)
+
+# Create visualization
+plot_visual_2(data)
+
+4.3 Visualization 3: The Most Popular day of the week for taking a ride to an NYC-based airport. We used the Pie chart because we have data for seven days.
+def get_data_for_visual_3(engine):
+   
+    query = """
+    WITH CombinedTrips AS (
+        SELECT 
+            dropoff_datetime, 
+            dropoff_lat, 
+            dropoff_lon 
+        FROM taxi_trips
+        UNION ALL
+        SELECT 
+            dropoff_datetime, 
+            dropoff_lat, 
+            dropoff_lon 
+        FROM uber_trips
+    ),
+    AirportTrips AS (
+        SELECT 
+            dropoff_datetime,
+            CASE
+                WHEN dropoff_lat BETWEEN 40.763589 AND 40.778865 
+                     AND dropoff_lon BETWEEN -73.891745 AND -73.854838 THEN 'LGA'
+                WHEN dropoff_lat BETWEEN 40.639263 AND 40.651376 
+                     AND dropoff_lon BETWEEN -73.795642 AND -73.766264 THEN 'JFK'
+                WHEN dropoff_lat BETWEEN 40.686794 AND 40.699680 
+                     AND dropoff_lon BETWEEN -74.194028 AND -74.165205 THEN 'EWR'
+                ELSE NULL
+            END AS Airport
+        FROM CombinedTrips
+    ),
+    FilteredTrips AS (
+        SELECT 
+            dropoff_datetime, 
+            Airport
+        FROM AirportTrips
+        WHERE Airport IS NOT NULL
+          AND dropoff_datetime BETWEEN '2020-01-01' AND '2024-08-31'
+    )
+    SELECT 
+        strftime('%w', dropoff_datetime) AS DayOfWeek,
+        COUNT(*) AS TripCount
+    FROM FilteredTrips
+    GROUP BY 
+        strftime('%w', dropoff_datetime)
+    ORDER BY 
+        DayOfWeek;
+    """
+    # Fetch data as DataFrame
+    dataframe = pd.read_sql(query, con=engine)
+
+    # Convert day of the week from numeric to names
+    day_map = {
+        '0': 'Sunday', '1': 'Monday', '2': 'Tuesday', '3': 'Wednesday',
+        '4': 'Thursday', '5': 'Friday', '6': 'Saturday'
+    }
+    dataframe['DayOfWeek'] = dataframe['DayOfWeek'].map(day_map)
+
+    return dataframe
+
+conn = sqlite3.connect('project.db')
+
+# Call the function to get the DataFrame
+dataframe = get_data_for_visual_3(conn)
+def plot_most_popular_day_for_airport_trips(dataframe):
+    """
+    Visualizes the most popular day of the week for trips to NYC airports (LGA, JFK, EWR) between 2020-2024.
+    The input dataframe should contain 'DayOfWeek' and 'TripCount' columns.
+    """
+    # Check if the dataframe has the necessary columns
+    if 'DayOfWeek' not in dataframe or 'TripCount' not in dataframe:
+        print("Error: DataFrame must contain 'DayOfWeek' and 'TripCount' columns.")
+        return
+
+    # Prepare the data for the pie chart
+    day_of_week = dataframe['DayOfWeek']
+    trip_count = dataframe['TripCount']
+
+    # Create a pie chart
+    plt.figure(figsize=(8, 8))
+    plt.pie(trip_count, labels=day_of_week, autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
+
+    # Add title
+    plt.title('Most Popular Day of the Week for NYC Airport Trips (2020-2024)', fontsize=16)
+
+    # Display the plot
+    plt.tight_layout()
+    plt.show()
+
+dataframe = get_data_for_visual_3(conn)
+
+# Visualize the most popular day
+plot_most_popular_day_for_airport_trips(dataframe)
+# 4.4 Visualization 4 : How much do hired rides earn in total fares monthly? We used the Grouped Bar chart for each service of Uber and Yellow Taxi because total fare amount include other fees
+
+def get_data_for_visual_4(engine):
+
+    query = """
+    SELECT
+        strftime('%Y-%m', pickup_datetime) AS year_month,
+        'Yellow Taxi' AS service,
+        SUM(base_fare) AS base_fare,
+        SUM(all_surcharges) AS all_surcharges,
+        SUM(taxes) AS taxes,
+        SUM(tolls) AS tolls,
+        SUM(total_fare) AS total_fare
+    FROM
+        taxi_trips
+    WHERE
+        pickup_datetime BETWEEN '2020-01-01' AND '2024-08-31'
+    GROUP BY
+        strftime('%Y-%m', pickup_datetime)
+    
+    UNION ALL
+
+    SELECT
+        strftime('%Y-%m', pickup_datetime) AS year_month,
+        'Uber' AS service,
+        SUM(base_fare) AS base_fare,
+        SUM(all_surcharges) AS all_surcharges,
+        SUM(taxes) AS taxes,
+        SUM(tolls) AS tolls,
+        SUM(total_fare) AS total_fare
+    FROM
+        uber_trips
+    WHERE
+        pickup_datetime BETWEEN '2020-01-01' AND '2024-08-31'
+    GROUP BY
+        strftime('%Y-%m', pickup_datetime)
+    
+    ORDER BY
+        year_month, service;
+    """
+    # Fetch the data as a DataFrame
+    dataframe = pd.read_sql(query, con=engine)
+    return dataframe
+
+conn = sqlite3.connect('project.db')
+
+# Call the function to get the DataFrame
+dataframe4 = get_data_for_visual_4(conn)
+def plot_visual_4(dataframe):
+    """
+    Creates a grouped bar chart comparing total fares with breakdown
+    (base fare, surcharges, taxes, tolls) for Yellow Taxis and Ubers.
+
+    Args:
+        dataframe (pd.DataFrame): DataFrame with aggregated fare data.
+    """
+    # Convert 'year_month' to datetime for sorting
+    dataframe['year_month'] = pd.to_datetime(dataframe['year_month'])
+
+    # Sort data by 'year_month'
+    dataframe = dataframe.sort_values(by='year_month')
+
+    # Set up the figure
+    plt.figure(figsize=(18, 10))
+
+    # Create a categorical x-axis with Uber and Yellow Taxi side-by-side for each month
+    categories = dataframe['year_month'].dt.strftime('%Y-%m').unique()
+    x = range(len(categories))  # Numerical positions for the x-axis
+    width = 0.4  # Width of each bar
+
+    # Filter data for Yellow Taxi and Uber
+    taxi_data = dataframe[dataframe['service'] == 'Yellow Taxi']
+    uber_data = dataframe[dataframe['service'] == 'Uber']
+
+    # Plot for Yellow Taxi
+    plt.bar(
+        [pos - width / 2 for pos in x], taxi_data['base_fare'],
+        width=width, label='Yellow Taxi - Base Fare', color='blue'
+    )
+    plt.bar(
+        [pos - width / 2 for pos in x], taxi_data['all_surcharges'],
+        bottom=taxi_data['base_fare'], width=width, label='Yellow Taxi - Surcharges', color='orange'
+    )
+    plt.bar(
+        [pos - width / 2 for pos in x], taxi_data['taxes'],
+        bottom=taxi_data['base_fare'] + taxi_data['all_surcharges'], width=width, label='Yellow Taxi - Taxes', color='green'
+    )
+    plt.bar(
+        [pos - width / 2 for pos in x], taxi_data['tolls'],
+        bottom=taxi_data['base_fare'] + taxi_data['all_surcharges'] + taxi_data['taxes'],
+        width=width, label='Yellow Taxi - Tolls', color='red'
+    )
+
+    # Plot for Uber
+    plt.bar(
+        [pos + width / 2 for pos in x], uber_data['base_fare'],
+        width=width, label='Uber - Base Fare', color='cyan', alpha=0.7
+    )
+    plt.bar(
+        [pos + width / 2 for pos in x], uber_data['all_surcharges'],
+        bottom=uber_data['base_fare'], width=width, label='Uber - Surcharges', color='yellow', alpha=0.7
+    )
+    plt.bar(
+        [pos + width / 2 for pos in x], uber_data['taxes'],
+        bottom=uber_data['base_fare'] + uber_data['all_surcharges'], width=width, label='Uber - Taxes', color='lime', alpha=0.7
+    )
+    plt.bar(
+        [pos + width / 2 for pos in x], uber_data['tolls'],
+        bottom=uber_data['base_fare'] + uber_data['all_surcharges'] + uber_data['taxes'],
+        width=width, label='Uber - Tolls', color='pink', alpha=0.7
+    )
+
+    # Add titles, labels, and legend
+    plt.title('Monthly Total Fares with Breakdown: Yellow Taxis vs Uber', fontsize=16)
+    plt.xlabel('Year-Month', fontsize=12)
+    plt.ylabel('Fare Amount ($)', fontsize=12)
+
+    # Customize x-axis ticks
+    plt.xticks(x, categories, rotation=45)
+
+    # Adjust legend and layout
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=10)
+    plt.tight_layout()
+
+    # Show the plot
+    plt.show()
+
+plot_visual_4(dataframe4)
