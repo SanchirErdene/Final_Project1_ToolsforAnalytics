@@ -1,0 +1,17 @@
+math==math
+seaborn==seaborn
+datetime==datetime
+scipy==scipy
+re==re
+folium==folium
+geopandas==geopandas
+bs4==bs4
+sqlite3==sqlite3
+IPython==IPython
+requests==requests
+os==os
+pandas==pandas
+matplotlib==matplotlib
+numpy==numpy
+typing==typing
+sqlalchemy==sqlalchemy
