@@ -359,3 +359,556 @@ for file_name in os.listdir(folder_path):
     if file_name.endswith(".parquet"):  # Process only Parquet files
         file_path = os.path.join(folder_path, file_name)
         process_and_sample_file(file_path, sample_folder_path)
+
+# 1.3 Common Functions : UBER
+def find_fhvhv_parquet_links() -> List[str]:
+    """
+    Find and filter links to FH and FHVHV Parquet files.
+
+    Returns:
+    List[str]: A list of URLs pointing to FH and FHVHV Parquet files, filtered by date.
+    """
+    # Fetch the HTML content from the target website.
+    html = get_taxi_html()  # Assumes get_taxi_html() retrieves the HTML content of the webpage.
+
+    # Parse the HTML content using BeautifulSoup for easy extraction of elements.
+    soup = bs4.BeautifulSoup(html, "html.parser")
+
+    # Find all <a> tags where the href attribute matches the regex pattern for 'fhvhv*.parquet'.
+    hvfhv_a_tags = soup.find_all(
+        "a", href=re.compile(r"fhvhv.*\.parquet", re.IGNORECASE)
+    )
+    
+    # Extract and clean the 'href' attributes from the matching <a> tags.
+    parquet_links = [
+        a["href"].strip() for a in hvfhv_a_tags if ".parquet" in (a.get("href") or "")
+    ]
+    
+    # Filter the extracted links by date.
+    return filter_links_by_date(parquet_links)
+
+# 1.3.2 Function to download the FHVHV parquet files
+def download_files(links: List[str], folder_name: str) -> None:
+    """Download files from a list of links and save them to the specified folder."""
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+        
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"}
+    
+    for link in links:
+        file_name = link.split("/")[-1]
+        file_path = os.path.join(folder_name, file_name)
+        print(f"Downloading {file_name} from {link}...")
+
+        if os.path.exists(file_path):
+            print(f"File {file_name} already exists. Skipping download.")
+            continue  # Skip to the next file if it already exists
+        
+        response = requests.get(link, headers=headers)
+        response.raise_for_status()  # Check if download was successful
+        
+        with open(file_path, "wb") as file:
+            file.write(response.content)
+        print(f"Downloaded {file_name}")
+
+# 1.3.3 Getting the Required FHVHV parquit link from Jan.01.2020 to Aug.31.2024
+filtered_links = find_fhvhv_parquet_links ()
+download_files(filtered_links, "fhvhv_raw")
+
+# 1.3.4 Filter out Non Uber Trip from the FHVHV parquet files
+# 1.3.4.5 Guiding from which folder this function will work and to which folder to save the Non Uber Trip parquet files
+SOURCE_FOLDER = r"./fhvhv_raw"
+OUTPUT_FOLDER = r"./processed_uber_data"
+def ensure_output_folder(output_folder: str) -> None:
+    """
+    Ensure the output folder exists. If not, create it.
+    """
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created output folder: {output_folder}")
+    else:
+        print(f"The folder '{output_folder}' already exists.")
+
+ensure_output_folder(OUTPUT_FOLDER)
+
+def list_parquet_files(folder: str) -> list:
+    """
+    List all Parquet files in the specified folder.
+    """
+    return [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.parquet')]
+
+# Get the list of Parquet files
+parquet_files = list_parquet_files(SOURCE_FOLDER)
+# 1.3.4.6 The Function to filder the UBER trip data. If the license_num in FHVHV files is HV0003, this indicates it is Uber Trip.
+def process_parquet_file(file_path: str, output_folder: str) -> str:
+    """
+    Process a single Parquet file:
+    - Filter rows where 'hvfhs_license_num' is 'HV0003'.
+    - Save the filtered data to a new file with a modified name.
+    """
+    # Extract the part of the filename after "fhvhv" to create the new file name
+    base_name = os.path.basename(file_path)  # Extracts the filename with extension
+    new_file_name = f"uber_{base_name.split('fhvhv')[-1]}"  # Create new filename with "uber_" prefix
+    output_file_path = os.path.join(output_folder, new_file_name)  # Full output path
+
+    # Skip if the output file already exists
+    if os.path.exists(output_file_path):
+        return f"Output file {output_file_path} already exists. Skipping processing for {file_path}."
+
+    # Read the Parquet file into a DataFrame
+    df = pd.read_parquet(file_path)
+
+    # Filter rows where 'hvfhs_license_num' is 'HV0003'
+    filtered_df = df[df['hvfhs_license_num'] == 'HV0003']
+
+    # Save the filtered DataFrame to a new Parquet file
+    filtered_df.to_parquet(output_file_path)
+
+    return f"Filtered data from {file_path} saved to {output_file_path}"
+results = []
+for file_path in parquet_files:
+    result = process_parquet_file(file_path, OUTPUT_FOLDER)
+    results.append(result)
+
+
+for result in results:
+    print(result)
+
+1.3.5 SAMPLE the UBER trips
+1.3.6 Using the above functions used for sampling Yellow Taxi trips. We used same function to Sample Filtered Uber trips
+uber_folder_path = r"./processed_uber_data"
+uber_sample_folder_path = r"./Sample Uber Data"
+create_folder_if_not_exists(uber_sample_folder_path)
+for file_name in os.listdir(uber_folder_path):
+    if file_name.endswith(".parquet"):  # Process only Parquet files
+        file_path = os.path.join(uber_folder_path, file_name)
+        process_and_sample_file(file_path, uber_sample_folder_path)
+
+# 1.4 Process Taxi Data
+1.4.1 This function filters the data on one month's url. For the required column we only choose the required column for our future data analysis. Also, We did Column Normalization that Columns of "Airport_fee" is wrotten diffent before and after 2023. From the Taxi Zone file, we found out that Location ID 57,104, and 105 are not exist in that file. Therefore we decided to filter those out. We made all column name into lower case to avoid any difficulties in further.
+def get_and_clean_taxi_month(url):
+    """
+    Load, clean, and filter taxi data from a Parquet file at the specified URL.
+
+    Parameters:
+    url (str): The URL to the Parquet file containing the taxi data.
+
+    Returns:
+    pd.DataFrame: A cleaned DataFrame containing the filtered taxi trip data.
+    """
+    taxi_data = pd.read_parquet(url)
+    
+    # List of columns to filter for
+    required_columns = ['tpep_pickup_datetime', 'tpep_dropoff_datetime', 'trip_distance', 'PULocationID', 'DOLocationID',
+                        'fare_amount', 'extra', 'mta_tax', 'tip_amount', 'tolls_amount', 'improvement_surcharge', 
+                        'total_amount', 'congestion_surcharge']
+    
+    # Step 1: Check if either 'airport_fee' or 'Airport_fee' exists (case-insensitive check)
+    if 'airport_fee' in taxi_data.columns:
+        required_columns.append('airport_fee')  # Add lowercase 'airport_fee'
+    elif 'Airport_fee' in taxi_data.columns:
+        required_columns.append('Airport_fee')  # Add capitalized 'Airport_fee'
+    
+    #  Filter the necessary columns
+    filtered_data = taxi_data[required_columns]
+    
+    # Remove rows where PUlocationID is 57, 104, or 105
+    filtered_data = filtered_data[~filtered_data['PULocationID'].isin([57, 104, 105, 264, 265])]
+    filtered_data = filtered_data[~filtered_data['DOLocationID'].isin([57, 104, 105, 264, 265])]
+
+    # Remove rows where PUlocationID equals DolocationID
+    filtered_data = filtered_data[filtered_data['PULocationID'] != filtered_data['DOLocationID']]
+
+    #Change all column names to lowercase
+    filtered_data.columns = [col.lower() for col in filtered_data.columns]
+
+    # Return the cleaned DataFrame
+    return filtered_data
+
+1.4.2 Function to use the filtered data and create the Filtered Yellow Taxi parquets
+def process_sampled_taxi_data(sample_folder: str, output_folder: str) -> None:
+    """
+    Process and clean Parquet files from a sample folder, saving the cleaned data to an output folder.
+
+    Parameters:
+    sample_folder (str): The path to the folder containing the original Parquet files.
+    output_folder (str): The path to the folder where the cleaned Parquet files will be saved.
+
+    Returns:
+    None
+    """
+    # Check if the output folder exists; if not, create it
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created output folder: {output_folder}")
+    
+    # Loop through all Parquet files in the sample folder
+    for file_name in os.listdir(sample_folder):
+        if file_name.endswith(".parquet"):  # Only process Parquet files
+            parquet_url = os.path.join(sample_folder, file_name)
+            
+            # Filter the data using the function
+            cleaned_data = get_and_clean_taxi_month(parquet_url)
+            
+            # Define the path for saving the cleaned file (in the output folder)
+            cleaned_file_path = os.path.join(output_folder, f"filtered_{file_name}")
+            
+            # Save the cleaned data to the output folder as a Parquet file
+            cleaned_data.to_parquet(cleaned_file_path)
+            print(f"Processed and saved filtered data for {file_name} to {cleaned_file_path}")
+
+sample_folder = r"./Sample Yellow Taxi"
+output_folder = r"./filtered_yellow_taxi"
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+    print(f"Created folder: {output_folder}")
+process_sampled_taxi_data(sample_folder, output_folder)
+
+# 1.4.3 Funtion to get the clean taxi data
+def get_and_clean_taxi_data(parquet_urls: str) -> pd.DataFrame:
+    """
+    Load, clean, and concatenate taxi data from multiple Parquet files in a given folder.
+
+    Parameters:
+    parquet_urls (str): The path to the folder containing the Parquet files.
+
+    Returns:
+    pd.DataFrame: A concatenated DataFrame containing the cleaned taxi data.
+    """
+    all_taxi_dataframes: List[pd.DataFrame] = []  # List to hold the dataframes
+    
+    for parquet_url in os.listdir(parquet_urls):
+        file_path = os.path.join(parquet_urls, parquet_url)
+        
+        # Read the Parquet file into a DataFrame
+        df = pd.read_parquet(file_path)
+        
+        # Drop columns that are entirely NaN
+        df = df.dropna(axis=1, how='all')
+        
+        # Append the cleaned dataframe to the list
+        all_taxi_dataframes.append(df)
+    
+    # Concatenate all DataFrames in the list into a single DataFrame
+    taxi_data = pd.concat(all_taxi_dataframes, ignore_index=True)
+
+    return taxi_data
+
+1.4.4. Getting the clean Yellow Taxi Data Frame
+parquet_urls= r"./filtered_yellow_taxi"
+taxi_data = get_and_clean_taxi_data(parquet_urls)
+taxi_data.head()
+
+# 1.4.5 To calculate the trip distance. We are adding to Pickup and Dropoff Latitude and longititude for trip.
+
+def add_lat_lon_to_taxi_data(taxi_data: pd.DataFrame, taxi_zone_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds the latitude and longitude for both pickuplocationid and dropofflocationid to the taxi_data.
+    
+    Parameters:
+    - taxi_data (pd.DataFrame): DataFrame containing taxi trip information with 'pickuplocationid' and 'dropofflocationid'.
+    - taxi_zone_df (pd.DataFrame): DataFrame containing 'LocationID', 'Latitude', and 'Longitude' for each location.
+    
+    Returns:
+    - pd.DataFrame: Modified taxi_data with added 'pickup_lat', 'pickup_lon', 'dropoff_lat', and 'dropoff_lon'.
+    """
+    if 'pickup_lat' not in taxi_data.columns or 'pickup_lon' not in taxi_data.columns:
+    # Merge taxi_data with taxi_zone_df to get the Latitude and Longitude for pickup
+        taxi_data = taxi_data.merge(taxi_zone_df[['LocationID', 'Latitude', 'Longitude']], 
+                                    left_on='pulocationid', right_on='LocationID', 
+                                    how='left')
+    
+        # Rename the new columns to indicate they are for pickup location
+        taxi_data.rename(columns={'Latitude': 'pickup_lat', 'Longitude': 'pickup_lon'}, inplace=True)
+    
+        # Drop the extra 'LocationID' column as it's not needed
+        taxi_data.drop(columns=['LocationID'], inplace=True)
+    
+    if 'dropoff_lat' not in taxi_data.columns or 'dropoff_lon' not in taxi_data.columns:
+    # Merge again to get the Latitude and Longitude for dropoff
+        taxi_data = taxi_data.merge(taxi_zone_df[['LocationID', 'Latitude', 'Longitude']], 
+                                    left_on='dolocationid', right_on='LocationID', 
+                                    how='left')
+    
+        # Rename the new columns to indicate they are for dropoff location
+        taxi_data.rename(columns={'Latitude': 'dropoff_lat', 'Longitude': 'dropoff_lon'}, inplace=True)
+    
+        # Drop the extra 'LocationID' column as it's not needed
+        taxi_data.drop(columns=['LocationID'], inplace=True)
+  
+    return taxi_data
+taxi_zone_df = pd.read_csv(r"./taxi_zone_coordinates.csv")
+taxi_data
+# Call the function to add latitude and longitude to the taxi_data
+taxi_data = add_lat_lon_to_taxi_data(taxi_data, taxi_zone_df)
+# Output the modified taxi_data
+taxi_data.head()
+# In our Data We are removing the trips that start and / or end outside the follwing following latitude/longitude coordinate box: (40.560445, -74.242330) and (40.908524, -73.717047)
+def filter_by_coordinates(taxi_data):
+    """Remove trips that start and/or end outside the specified latitude/longitude box."""
+    
+    # Define the bounding box coordinates
+    LAT_MIN = 40.560445
+    LAT_MAX = 40.908524
+    LONG_MIN = -74.242330
+    LONG_MAX = -73.717047
+    
+    # Filter trips where pickup and dropoff locations are within the bounding box
+    filtered_data = taxi_data[
+        (taxi_data["pickup_lat"] >= LAT_MIN) & 
+        (taxi_data["pickup_lat"] <= LAT_MAX) &
+        (taxi_data["pickup_lon"] >= LONG_MIN) & 
+        (taxi_data["pickup_lon"] <= LONG_MAX) &
+        (taxi_data["dropoff_lat"] >= LAT_MIN) & 
+        (taxi_data["dropoff_lat"] <= LAT_MAX) &
+        (taxi_data["dropoff_lon"] >= LONG_MIN) & 
+        (taxi_data["dropoff_lon"] <= LONG_MAX)
+    ]
+    
+    return filtered_data
+filtered_taxi_data = filter_by_coordinates(taxi_data)
+filtered_taxi_data.head()
+
+# Normalizing the Columns and surcharge fees
+
+def add_total_fare_and_drop_columns_taxi(dataframe):
+    dataframe = dataframe.copy()
+    all_surcharges = ['improvement_surcharge', 'congestion_surcharge','airport_fee'  ]
+    # Check if all fare columns exist in the DataFrame before summing
+    if all(col in dataframe.columns for col in all_surcharges):
+        dataframe['all_surcharges'] = dataframe[all_surcharges].sum(axis=1)
+    else:
+        print("Some fare columns are missing. 'total_fare' cannot be calculated.")
+    
+    # List of columns to drop, including fare columns and the additional ones
+    columns_to_drop = all_surcharges + ['pulocationid', 'dolocationid', 'extra']
+    
+    # Drop columns only if they exist in the DataFrame
+    columns_to_drop_existing = [col for col in columns_to_drop if col in dataframe.columns]
+    if columns_to_drop_existing:
+        dataframe.drop(columns=columns_to_drop_existing, inplace=True)
+    else:
+        print("No columns to drop or some specified columns are missing.")
+    
+    if 'tip_amount' in dataframe.columns:
+            dataframe.rename(columns={'tip_amount': 'tips'}, inplace=True)
+    if 'tpep_pickup_datetime' in dataframe.columns:
+            dataframe.rename(columns={'tpep_pickup_datetime': 'pickup_datetime'}, inplace=True)
+    if 'tpep_dropoff_datetime' in dataframe.columns:
+            dataframe.rename(columns={'tpep_dropoff_datetime': 'dropoff_datetime'}, inplace=True)
+    if 'total_amount' in dataframe.columns:
+            dataframe.rename(columns={'total_amount': 'total_fare'}, inplace=True)
+    if 'fare_amount' in dataframe.columns:
+            dataframe.rename(columns={'fare_amount': 'base_fare'}, inplace=True)
+    if 'tolls_amount' in dataframe.columns:
+            dataframe.rename(columns={'tolls_amount': 'tolls'}, inplace=True)      
+    if 'mta_tax' in dataframe.columns:
+            dataframe.rename(columns={'mta_tax': 'taxes'}, inplace=True)
+    return dataframe
+filtered_taxi_data= add_total_fare_and_drop_columns_taxi(filtered_taxi_data)
+filtered_taxi_data.head()
+
+filtered_taxi_data.head()
+filtered_taxi_data.info()
+filtered_taxi_data.describe()
+# 1.5 Processing Uber Data
+def get_and_clean_uber_month(url: str) -> pd.DataFrame:
+    """
+    Load, clean, and filter Uber data from a Parquet file for a specific month.
+
+    Parameters:
+    url (str): The URL or file path to the Uber Parquet file.
+
+    Returns:
+    pd.DataFrame: A cleaned and filtered DataFrame containing the Uber data.
+    """
+    # Load the data from the Parquet file
+    uber_data = pd.read_parquet(url)
+    
+    # Step 1: Define the columns to exclude
+    exclude_columns = [
+        'hvfhs_license_num', 'dispatching_base_num', 'originating_base_num', 'request_datetime',
+        'on_scene_datetime', 'passenger_count', 'shared_request_flag', 'access_a_ride_flag',
+        'shared_match_flag', 'access_a_ride_flag', 'wav_request_flag', 'wav_match_flag', 'bcf', 'driver_pay'
+    ]
+   
+    # Step 2: Remove unwanted columns
+    filtered_data = uber_data.drop(columns=[col for col in exclude_columns if col in uber_data.columns], errors='ignore')
+
+    # Step 4: Remove rows where PUlocationID or DOlocationID are 57, 104, or 105
+    filtered_data = filtered_data[
+        ~filtered_data['PULocationID'].isin([57, 104, 105]) &
+        ~filtered_data['DOLocationID'].isin([57, 104, 105])
+    ]
+
+    # Step 5: Remove rows where PUlocationID equals DOlocationID
+    filtered_data = filtered_data[filtered_data['PULocationID'] != filtered_data['DOLocationID']]
+    
+    # Change all column names to lowercase
+    filtered_data.columns = [col.lower() for col in filtered_data.columns]
+
+    # Return the cleaned DataFrame
+    return filtered_data
+
+def process_sampled_uber_data(sample_folder: str, output_folder: str) -> None:
+    """
+    Process and clean Uber data files in the sample folder, saving the cleaned data to the output folder.
+
+    Parameters:
+    sample_folder (str): The folder path containing the raw Parquet files.
+    output_folder (str): The folder path where cleaned Parquet files will be saved.
+    
+    Returns:
+    None: This function saves the cleaned data to the output folder and does not return a value.
+    """
+    # Check if the output folder exists; if not, create it
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+   
+    # Loop through all Parquet files in the sample folder
+    for file_name in os.listdir(sample_folder):
+        if file_name.endswith(".parquet"):  # Only process Parquet files
+            parquet_url = os.path.join(sample_folder, file_name)
+            
+            # Filter the data using the cleaning function
+            cleaned_data = get_and_clean_uber_month(parquet_url)
+            
+            # Define the path for saving the cleaned file (in the output folder)
+            cleaned_file_path = os.path.join(output_folder, f"filtered_{file_name}")
+            
+            # Save the cleaned data to the output folder as a Parquet file
+            cleaned_data.to_parquet(cleaned_file_path)
+            print(f"Processed and saved filtered data for {file_name} to {cleaned_file_path}")
+
+sample_folder= r"./Sample Uber Data"
+output_folder = r"./filtered_uber"
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+    print(f"Created folder: {output_folder}")
+process_sampled_uber_data(sample_folder, output_folder)
+
+def get_and_clean_uber_data(parquet_urls):
+    all_uber_dataframes = []
+    
+    for parquet_url in os.listdir(parquet_urls):
+        file_path = os.path.join(parquet_urls, parquet_url)
+        df = pd.read_parquet(file_path)
+        df = df.dropna(axis=1, how='all')
+        all_uber_dataframes.append(df)
+    uber_data = pd.concat(all_uber_dataframes, ignore_index=True)
+    return uber_data
+
+def get_uber_data():
+    all_urls = get_all_urls_from_tlc_page(TLC_URL)
+    all_parquet_urls = find_parquet_urls(all_urls)
+    taxi_data = get_and_clean_uber_data(all_parquet_urls)
+    return taxi_data
+
+uber_parquet_urls= r"./filtered_uber"
+uber_data = get_and_clean_uber_data(uber_parquet_urls)
+uber_data.head()
+
+uber_data.head()
+
+def add_lat_lon_to_uber_data(uber_data: pd.DataFrame, taxi_zone_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds the latitude and longitude for both pickuplocationid and dropofflocationid to the taxi_data.
+    
+    Parameters:
+    - taxi_data (pd.DataFrame): DataFrame containing taxi trip information with 'pickuplocationid' and 'dropofflocationid'.
+    - taxi_zone_df (pd.DataFrame): DataFrame containing 'LocationID', 'Latitude', and 'Longitude' for each location.
+    
+    Returns:
+    - pd.DataFrame: Modified taxi_data with added 'pickup_lat', 'pickup_lon', 'dropoff_lat', and 'dropoff_lon'.
+    """
+    if 'pickup_lat' not in uber_data.columns or 'pickup_lon' not in uber_data.columns:
+    # Merge taxi_data with taxi_zone_df to get the Latitude and Longitude for pickup
+        uber_data = uber_data.merge(taxi_zone_df[['LocationID', 'Latitude', 'Longitude']], 
+                                    left_on='pulocationid', right_on='LocationID', 
+                                    how='left')
+    
+        # Rename the new columns to indicate they are for pickup location
+        uber_data.rename(columns={'Latitude': 'pickup_lat', 'Longitude': 'pickup_lon'}, inplace=True)
+    
+        # Drop the extra 'LocationID' column as it's not needed
+        uber_data.drop(columns=['LocationID'], inplace=True)
+    
+    if 'dropoff_lat' not in uber_data.columns or 'dropoff_lon' not in uber_data.columns:
+    # Merge again to get the Latitude and Longitude for dropoff
+        uber_data = uber_data.merge(taxi_zone_df[['LocationID', 'Latitude', 'Longitude']], 
+                                    left_on='dolocationid', right_on='LocationID', 
+                                    how='left')
+    
+        # Rename the new columns to indicate they are for dropoff location
+        uber_data.rename(columns={'Latitude': 'dropoff_lat', 'Longitude': 'dropoff_lon'}, inplace=True)
+    
+        # Drop the extra 'LocationID' column as it's not needed
+        uber_data.drop(columns=['LocationID'], inplace=True)
+  
+    return uber_data
+
+taxi_zone_df = pd.read_csv(r"./taxi_zone_coordinates.csv")
+
+# Example taxi_data (this should be your main taxi trip DataFrame)
+uber_data
+# Call the function to add latitude and longitude to the taxi_data
+uber_data = add_lat_lon_to_uber_data(uber_data, taxi_zone_df)
+# Output the modified taxi_data
+uber_data.head()
+
+filtered_coordin_uber_data = filter_by_coordinates(uber_data)
+filtered_coordin_uber_data.head()
+
+Normalizing the Columns and callculating all surcharges
+def add_total_fare_and_drop_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """
+    This function adds a 'total_fare' column by summing specified fare-related columns and an 'all_surcharges' column
+    for congestion surcharge and airport fee. It also drops unnecessary columns and renames others if applicable.
+    
+    Parameters:
+    dataframe (pd.DataFrame): The input DataFrame containing the taxi data.
+    
+    Returns:
+    pd.DataFrame: The modified DataFrame with new columns and dropped/renamed columns.
+    """
+    
+    fare_columns = ['base_passenger_fare', 'tolls', 'sales_tax', 'congestion_surcharge', 'airport_fee']
+    all_surcharges = ['congestion_surcharge', 'airport_fee']
+    columns_to_drop = all_surcharges + ['pulocationid', 'dolocationid', 'trip_time']
+    
+    # Ensure all fare columns exist before summing
+    if all(col in dataframe.columns for col in fare_columns):
+        dataframe.loc[:, 'total_fare'] = dataframe[fare_columns].sum(axis=1)
+    else:
+        print("Some fare columns are missing. 'total_fare' cannot be calculated.")
+    
+    # Ensure all surcharge columns exist before summing
+    if all(col in dataframe.columns for col in all_surcharges):
+        dataframe.loc[:, 'all_surcharges'] = dataframe[all_surcharges].sum(axis=1)
+    else:
+        print("Some surcharge columns are missing. 'all_surcharges' cannot be calculated.")
+    
+    # Drop columns that exist in the DataFrame
+    columns_to_drop_existing = [col for col in columns_to_drop if col in dataframe.columns]
+    if columns_to_drop_existing:
+        dataframe.drop(columns=columns_to_drop_existing, inplace=True)
+    else:
+        print("No columns to drop or some specified columns are missing.")
+    
+    # Rename specific columns if they exist
+    rename_dict = {
+        'trip_miles': 'trip_distance',
+        'base_passenger_fare': 'base_fare',
+        'sales_tax': 'taxes'
+    }
+    
+    dataframe.rename(columns={col: rename_dict[col] for col in rename_dict if col in dataframe.columns}, inplace=True)
+    
+    return dataframe
+
+filtered_coordin_uber_data = add_total_fare_and_drop_columns(filtered_coordin_uber_data)
+filtered_coordin_uber_data.head()
+filtered_coordin_uber_data.info()
+filtered_coordin_uber_data.describe()
+uber_data.describe()
+
