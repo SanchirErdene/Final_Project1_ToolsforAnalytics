@@ -1,0 +1,51 @@
+# all import statements needed for the project, for example:
+import os
+import bs4
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import requests
+import sqlalchemy as db
+from sqlalchemy import text
+from bs4 import BeautifulSoup
+import re
+from datetime import datetime
+from typing import List
+!pip install geopandas
+import geopandas as gpd
+import math
+import numpy as np
+import sqlite3
+import scipy.stats as stats
+from sqlalchemy import create_engine
+from scipy.stats import norm
+from typing import Union
+
+TAXI_URL = "https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page"
+
+TAXI_ZONES_DIR = r"./taxi_zones"
+TAXI_ZONES_SHAPEFILE = f"{TAXI_ZONES_DIR}/taxi_zones.shp"
+WEATHER_CSV_DIR = r"./raw_weather_data"
+
+CRS = 4326  # coordinate reference system
+
+# (lat, lon)
+NEW_YORK_BOX_COORDS = ((40.560445, -74.242330), (40.908524, -73.717047))
+LGA_BOX_COORDS = ((40.763589, -73.891745), (40.778865, -73.854838))
+JFK_BOX_COORDS = ((40.639263, -73.795642), (40.651376, -73.766264))
+EWR_BOX_COORDS = ((40.686794, -74.194028), (40.699680, -74.165205))
+
+DATABASE_URL = "sqlite:///project.db"
+DATABASE_SCHEMA_FILE = "schema.sql"
+QUERY_DIRECTORY = "queries"
+
+# Make sure the QUERY_DIRECTORY exists
+try:
+    os.mkdir(QUERY_DIRECTORY)
+except Exception as e:
+    if e.errno == 17:
+        # the directory already exists
+        pass
+    else:
+        raise
+        
