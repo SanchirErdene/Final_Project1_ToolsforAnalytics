@@ -1823,3 +1823,274 @@ def plot_visual_4(dataframe):
     plt.show()
 
 plot_visual_4(dataframe4)
+
+# Visualization 5: Does precipitation or distance traveled affect the amount of tip?
+# I chose scatter plot to better show the distribution of tips amount verses trip distance and preciputation for taxi and uber
+def plot_visual_5(df_taxi: pd.DataFrame, df_uber: pd.DataFrame) -> None:
+    # Create the 2x2 figure layout
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    
+    # Identify and remove outlier in the 'trip_distance' column (longest distance) from df_taxi
+    max_distance_taxi = df_taxi['trip_distance'].max()
+    df_taxi_without_outlier = df_taxi[df_taxi['trip_distance'] != max_distance_taxi]
+    
+    # Plot 1: Tips vs. Trip Distance (Yellow Taxi)
+    axes[0, 0].scatter(df_taxi_without_outlier['trip_distance'], df_taxi_without_outlier['tips'], color='yellow', alpha=0.5)
+    axes[0, 0].set_title('Tips vs. Trip Distance (Yellow Taxi) Without outliers')
+    axes[0, 0].set_xlabel('Trip Distance')
+    axes[0, 0].set_ylabel('Tips')
+
+    # Plot 2: Tips vs. Trip Distance (Uber)
+    axes[0, 1].scatter(df_uber['trip_distance'], df_uber['tips'], color='blue', alpha=0.5)
+    axes[0, 1].set_title('Tips vs. Trip Distance (Uber)')
+    axes[0, 1].set_xlabel('Trip Distance')
+    axes[0, 1].set_ylabel('Tips')
+
+    # Plot 3: Tips vs. Precipitation (Yellow Taxi)
+    axes[1, 0].scatter(df_taxi['hourlyprecipitation'], df_taxi['tips'], color='yellow', alpha=0.5)
+    axes[1, 0].set_title('Tips vs. Precipitation (Yellow Taxi)')
+    axes[1, 0].set_xlabel('Hourly Precipitation')
+    axes[1, 0].set_ylabel('Tips')
+
+    # Plot 4: Tips vs. Precipitation (Uber)
+    axes[1, 1].scatter(df_uber['hourlyprecipitation'], df_uber['tips'], color='blue', alpha=0.5)
+    axes[1, 1].set_title('Tips vs. Precipitation (Uber)')
+    axes[1, 1].set_xlabel('Hourly Precipitation')
+    axes[1, 1].set_ylabel('Tips')
+
+    # Adjust layout to prevent overlapping
+    plt.tight_layout()
+
+    plt.show()
+
+    def get_data_for_visual_5():
+    conn = sqlite3.connect('project.db')
+    
+    # Query for Yellow Taxi data
+    query_taxi = """
+    SELECT tips, trip_distance, pickup_datetime, hourlyprecipitation
+    FROM taxi_trips
+    LEFT JOIN hourly_weather
+    ON strftime('%Y-%m', taxi_trips.pickup_datetime) = strftime('%Y-%m', hourly_weather.dateonly)
+    WHERE strftime('%Y', taxi_trips.pickup_datetime) IN ('2022', '2023');
+    """
+    
+    # Query for Uber data
+    query_uber = """
+    SELECT tips, trip_distance, pickup_datetime, hourlyprecipitation
+    FROM uber_trips
+    LEFT JOIN hourly_weather
+    ON strftime('%Y-%m', uber_trips.pickup_datetime) = strftime('%Y-%m', hourly_weather.dateonly)
+    WHERE strftime('%Y', uber_trips.pickup_datetime) IN ('2022', '2023');
+    """
+    
+    # Fetch and combine the data into dataframes
+    df_taxi = pd.read_sql(query_taxi, conn)
+    df_uber = pd.read_sql(query_uber, conn)
+    
+    # Close the connection
+    conn.close()
+    
+    return df_taxi, df_uber
+
+df_taxi, df_uber = get_data_for_visual_5()
+plot_visual_5(df_taxi,df_uber)
+
+# Visualization 6: Heatmap of all hired trips in 2020 over a map of the area (I chose to show all hired trips in 2020 over a map of the area using heatmap to better show which areas require more taxi/uber rised/ most visited. )
+import folium
+from folium.plugins import HeatMap
+from IPython.display import display 
+
+def plot_visual_6(dataframe: pd.DataFrame) -> None:
+    # Create a base map centered around the average latitude and longitude of the trips
+    map_center = [dataframe['pickup_lat'].mean(), dataframe['pickup_lon'].mean()]
+    mymap = folium.Map(location=map_center, zoom_start=12)
+
+    # Prepare the heatmap data
+    heat_data = [[row['pickup_lat'], row['pickup_lon']] for index, row in dataframe.iterrows()]
+    
+    # Create the heatmap
+    HeatMap(heat_data).add_to(mymap)
+
+    # Display the map directly in the Jupyter Notebook
+    display(mymap)
+
+def get_data_for_visual_6() -> pd.DataFrame:
+
+    conn = sqlite3.connect('project.db')
+    
+    # Query to extract the relevant data for taxi and uber trips in 2020
+    query_taxi = """
+    SELECT pickup_lat, pickup_lon
+    FROM taxi_trips
+    WHERE strftime('%Y', pickup_datetime) = '2020';
+    """
+    
+    query_uber = """
+    SELECT pickup_lat, pickup_lon
+    FROM uber_trips
+    WHERE strftime('%Y', pickup_datetime) = '2020';
+    """
+    
+    # Read data into pandas DataFrames
+    df_taxi = pd.read_sql(query_taxi, conn)
+    df_uber = pd.read_sql(query_uber, conn)
+    
+    # Combine both datasets
+    df_combined = pd.concat([df_taxi, df_uber], ignore_index=True)
+    
+    # Filter out any rows with missing latitude or longitude (we've already done this when cleaning the data)
+    df_combined = df_combined.dropna(subset=['pickup_lat', 'pickup_lon'])
+    
+    return df_combined
+
+visual6_dataframe = get_data_for_visual_6()
+plot_visual_6(visual6_dataframe)
+
+# Part 5: Extra Credit Sunrise Sunset
+# 5.1 Process the Data and Achieve Dataset
+directory = WEATHER_CSV_DIR
+output_directory = WEATHER_CSV_DIR
+
+def get_raw_weather_data_again(directory: str) -> List[str]:
+    # Ensure the directory exists
+    if not os.path.isdir(directory):
+        raise ValueError(f"The provided path is not a valid directory: {directory}")
+    
+    # List all files in the directory and filter for .csv files that do not contain 'cleaned' in their name
+    csv_files = [
+        f for f in os.listdir(directory) 
+        if f.endswith('.csv') and 'cleaned' not in f.lower() and os.path.isfile(os.path.join(directory, f))
+    ]
+    
+    # Return the full path to each valid CSV file
+    return [os.path.join(directory, f) for f in csv_files]
+
+get_raw_weather_data_again(directory)
+
+def clean_sunrise_sunset_data(csv_file: str, output_directory: str) -> None:
+    df = pd.read_csv(csv_file)
+    # Make sure the columns are in the correct format
+    df['DATE'] = pd.to_datetime(df['DATE'])
+
+    # Filter rows with non-null entries for both sunrise and sunset
+    filtered_df = df.dropna(subset=['Sunrise', 'Sunset'])
+
+    # Extract dateonly from 'DATE'
+    filtered_df['dateonly'] = filtered_df['DATE'].dt.date
+
+    # Extract hour part from sunrise and sunset
+    filtered_df['sunrisehour'] = filtered_df['Sunrise'].apply(lambda x: str(int(x) // 100))  # Hour part of sunrise
+    filtered_df['sunsethour'] = filtered_df['Sunset'].apply(lambda x: str(int(x) // 100))  # Hour part of sunset
+
+    # Select only the required columns, and ensure the column names are lowercase
+    final_df = filtered_df[['dateonly', 'Sunrise', 'Sunset', 'sunrisehour', 'sunsethour']]
+    final_df.columns = final_df.columns.str.lower()
+
+    # Generate a new CSV file with the cleaned data
+    output_filename = csv_file.replace('.csv', '_sunset_sunrise.csv')
+    final_df.to_csv(output_filename, index=False)
+    print(f"Sunset sunrise data saved to {output_filename}")
+
+# create cleaned files seperately:
+input_directory = WEATHER_CSV_DIR
+output_directory = input_directory  # Folder where the cleaned files will be saved
+
+# Get all CSV files in the folder
+csv_files_1 = get_raw_weather_data_again(input_directory)
+
+# Check if multiple files are found
+if len(csv_files) == 0:
+    print("No CSV files found in the directory.")
+else:
+    # Process each CSV file
+    for csv_file in csv_files_1:
+        print(f"Processing file: {csv_file}")  # Debug: show which file is being processed
+        cleaned_data = clean_sunrise_sunset_data(csv_file, output_directory)
+
+        # Optionally, print the cleaned data to verify
+        print(f"Cleaned sunrise sunset data saved for: {csv_file}")
+
+def merge_cleaned_sunrise_sunset_files(input_directory: str, output_filename: str) -> None:
+    # Get all CSV files in the directory that end with "sunset_sunrise"
+    cleaned_sunrise_sunset_files = [f for f in os.listdir(input_directory) if  f.endswith('sunset_sunrise.csv')]
+    
+    # Check if we found any files
+    if not cleaned_sunrise_sunset_files:
+        print(f"No CSV files found in {input_directory} that end with 'sunrise_sunset'.")
+        return
+
+    # Initialize a list to hold all DataFrames
+    all_cleaned_sunrise_sunset_data = []
+
+    # Read each cleaned file and append it to the list
+    for cleaned_sunrise_sunset_file in cleaned_sunrise_sunset_files:
+        file_path_1 = os.path.join(input_directory, cleaned_sunrise_sunset_file)
+        print(f"Reading file: {file_path_1}")  # Debug: show which file is being processed
+        
+        # Read the CSV file into a DataFrame
+        cleaned_sunrise_sunset_data = pd.read_csv(file_path_1)
+        
+        # Append the DataFrame to the list
+        all_cleaned_sunrise_sunset_data.append(cleaned_sunrise_sunset_data)
+
+    # Merge all the DataFrames into one
+    merged_sunrise_sunset_data = pd.concat(all_cleaned_sunrise_sunset_data, ignore_index=True)
+
+    # Define the output file path
+    output_file_path = os.path.join(input_directory, output_filename)
+
+    # Save the merged DataFrame to a new CSV file
+    merged_sunrise_sunset_data.to_csv(output_file_path, index=False)
+    
+    # Debug: Confirm the merged file is saved
+    print(f"All cleaned data merged and saved to: {output_file_path}")
+
+input_directory = WEATHER_CSV_DIR
+output_filename = "cleaned_sunrise_sunset.csv"
+merge_cleaned_sunrise_sunset_files(input_directory, output_filename)
+
+sunrise_sunset_data = pd.read_csv(r'./raw_weather_data/cleaned_sunrise_sunset.csv')
+sunrise_sunset_data.head()
+
+sunrise_sunset_data.info()
+
+sunrise_sunset_data.describe()
+
+# Part 6: Extra Credit Animation
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from IPython.display import HTML
+
+dataframe = get_data_for_visual_3(conn)
+df = pd.DataFrame(dataframe)
+
+# Prepare the figure for the animation
+fig, ax = plt.subplots(figsize=(6, 4))
+
+# Initial Pie Chart (empty)
+def update(frame):
+    # Clear the previous plot
+    ax.clear()
+
+    # Data for the current frame
+    current_data = df.iloc[:frame+1]
+
+    # Plot the pie chart with the current data
+    ax.pie(current_data['TripCount'], labels=current_data['DayOfWeek'], autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
+    
+    # Add a title
+    ax.set_title(f"Trip Count Distribution (Up to Day {frame+1})", fontsize=16)
+
+    return ax.patches
+
+# Create the animation
+ani = animation.FuncAnimation(
+    fig, update, frames=len(df), interval=1000, blit=False
+)
+
+# Display the animation inline in Jupyter Notebook
+display(HTML(ani.to_jshtml()))
+
+# Optionally, save the animation
+ani.save("trip_count_pie_animation.mp4", writer="ffmpeg", fps=1)
