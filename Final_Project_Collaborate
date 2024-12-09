@@ -48,4 +48,116 @@ except Exception as e:
         pass
     else:
         raise
+
+
+
+Part 1: Data Preprocessing
+1.1 Load Taxi Zones
+1.1.1 Loading the taxi_zone shapefile
+def load_taxi_zones(shapefile):
+    """
+    Load taxi zones data from a shapefile.
+
+    Parameters:
+    shapefile (str): The file path to the taxi zones shapefile.
+
+    Returns:
+    GeoDataFrame: A GeoPandas GeoDataFrame containing the taxi zones data if loading is successful.
+                  Returns None if an error occurs.
+    """
+    try:
+        # Attempt to load the shapefile into a GeoPandas GeoDataFrame
+        taxi_zones = gpd.read_file(shapefile)
+
+        # Print a success message with the number of zones loaded
+        print(f"Taxi Zones data loaded successfully. Total zones: {len(taxi_zones)}")
+
+        # Return the loaded GeoDataFrame
+        return taxi_zones
+    except Exception as e:
+        # Handle any errors that occur during loading and print the error message
+        print(f"Error loading Taxi Zones shapefile: {e}")
+
+        # Return None to indicate failure
+        return None
+1.1.2 Look up the latitude and longitude for a given Taxi Zone location ID and return latitude, longitude of location ID
+
+def lookup_coords_for_taxi_zone_id(
+    zone_loc_id: int, 
+    loaded_taxi_zones: gpd.GeoDataFrame
+): 
+    """
+    Look up the coordinates (latitude and longitude) for a given taxi zone Location ID.
+
+    Parameters:
+    zone_loc_id (int): The Location ID of the taxi zone to look up.
+    loaded_taxi_zones (gpd.GeoDataFrame): A GeoPandas GeoDataFrame containing taxi zone geometries and attributes.
+
+    Returns:
+    Optional[Tuple[float, float]]: A tuple (latitude, longitude) of the centroid of the taxi zone geometry if found.
+                                   Returns None if the Location ID is not found or an error occurs.
+    """
+    try:
+        # Convert the GeoDataFrame to the WGS84 coordinate reference system (EPSG:4326).
+        loaded_taxi_zones = loaded_taxi_zones.to_crs(epsg=4326)
+
+        # Find the row corresponding to the provided Location ID.
+        zone = loaded_taxi_zones.loc[loaded_taxi_zones['LocationID'] == zone_loc_id]
         
+        # If no match is found, return None.
+        if zone.empty:
+            print(f"Location ID {zone_loc_id} not found.")
+            return None
+        
+        # Extract the longitude and latitude of the zone's centroid.
+        lon = zone.geometry.centroid.x.values[0]
+        lat = zone.geometry.centroid.y.values[0]
+        
+        # Return the coordinates as a tuple.
+        return lat, lon
+
+    except Exception as e:
+        # Handle any exceptions and print an error message.
+        print(f"Error occurred while looking up coordinates: {e}")
+        return None
+
+1.1.3 Downloading coordinates of Taxi Zone to csv file
+def lookup_coords_for_taxi_zone_id(zone_loc_id, loaded_taxi_zones):
+    """
+    Look up the coordinates (latitude and longitude) for a given taxi zone Location ID.
+
+    Parameters:
+    zone_loc_id (int): The Location ID of the taxi zone to look up.
+    loaded_taxi_zones (GeoDataFrame): A GeoPandas GeoDataFrame containing taxi zone geometries and attributes.
+
+    Returns:
+    tuple: A tuple (latitude, longitude) representing the coordinates of the centroid of the taxi zone.
+           Returns None if the Location ID is not found or an error occurs.
+    """
+
+    try:
+        # Convert the GeoDataFrame's coordinate reference system (CRS) to WGS84 (EPSG:4326)
+        # which uses latitude and longitude. This ensures consistency in geographic coordinates.
+        loaded_taxi_zones = loaded_taxi_zones.to_crs(epsg=4326)
+
+        # Filter the GeoDataFrame to find the row corresponding to the specified Location ID.
+        zone = loaded_taxi_zones.loc[loaded_taxi_zones['LocationID'] == zone_loc_id]
+        
+        # Check if the filtered GeoDataFrame is empty, indicating the Location ID was not found.
+        if zone.empty:
+            print(f"Location ID {zone_loc_id} not found.")
+            return None  # Return None if no matching Location ID exists.
+        
+        # Calculate the longitude (x) and latitude (y) of the centroid of the zone's geometry.
+        lon = zone.geometry.centroid.x.values[0]
+        lat = zone.geometry.centroid.y.values[0]
+        
+        # Return the coordinates as a tuple (latitude, longitude).
+        return lat, lon
+
+    except Exception as e:
+     
+        print(f"Error occurred while looking up coordinates: {e}")
+        return None
+    
+    
