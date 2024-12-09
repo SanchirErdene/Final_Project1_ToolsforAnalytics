@@ -51,9 +51,9 @@ except Exception as e:
 
 
 
-Part 1: Data Preprocessing
-1.1 Load Taxi Zones
-1.1.1 Loading the taxi_zone shapefile
+#Part 1: Data Preprocessing
+#1.1 Load Taxi Zones
+#1.1.1 Loading the taxi_zone shapefile
 def load_taxi_zones(shapefile):
     """
     Load taxi zones data from a shapefile.
@@ -80,7 +80,7 @@ def load_taxi_zones(shapefile):
 
         # Return None to indicate failure
         return None
-1.1.2 Look up the latitude and longitude for a given Taxi Zone location ID and return latitude, longitude of location ID
+#1.1.2 Look up the latitude and longitude for a given Taxi Zone location ID and return latitude, longitude of location ID
 
 def lookup_coords_for_taxi_zone_id(
     zone_loc_id: int, 
@@ -121,7 +121,7 @@ def lookup_coords_for_taxi_zone_id(
         print(f"Error occurred while looking up coordinates: {e}")
         return None
 
-1.1.3 Downloading coordinates of Taxi Zone to csv file
+##1.1.3 Downloading coordinates of Taxi Zone to csv file
 def lookup_coords_for_taxi_zone_id(zone_loc_id, loaded_taxi_zones):
     """
     Look up the coordinates (latitude and longitude) for a given taxi zone Location ID.
@@ -160,4 +160,202 @@ def lookup_coords_for_taxi_zone_id(zone_loc_id, loaded_taxi_zones):
         print(f"Error occurred while looking up coordinates: {e}")
         return None
     
+#Calculate Sample Size
+
+def calculate_sample_size(population, confidence_level=0.95, margin_of_error=0.05, proportion=0.5):
+
+    z_scores = {
+        0.90: 1.645,
+        0.95: 1.96,
+        0.99: 2.576
+    }   
+    # Get the Z-score for the desired confidence level
+    Z = z_scores.get(confidence_level, 1.96)  # Default to 95% confidence if not found
     
+    # Cochran's sample size formula (n0)
+    n0 = (Z ** 2 * proportion * (1 - proportion)) / (margin_of_error ** 2)
+    
+    # Adjust for finite population if necessary
+    if population < 1000:  # If population is small, apply finite population correction
+        n = n0 / (1 + (n0 - 1) / population)
+    else:
+        n = n0
+    
+    return math.ceil(n)  # Round up to ensure the sample size is sufficient
+
+#1.2 Common Functions : YELLOW TAXI
+#1.2.1 Defining get_taxi_html funtion to get the content from NewYork Taxi Trip Reports
+def get_taxi_html() -> str:
+    response = requests.get(TAXI_URL)
+    response.raise_for_status()
+    html = response.content
+    return html
+
+#1.2.2. The function to find the parquet links of the Only Yellow Taxi trip
+def find_taxi_parquet_links() -> List[str]:
+    """
+    Find and filter links to Yellow Taxi Trip parquet files.
+
+    Returns:
+    List[str]: A list of URLs pointing to Yellow Taxi Trip parquet files, filtered by date.
+    """
+    # Fetch the HTML content from the target website
+    html = get_taxi_html()  # Assumes get_taxi_html() retrieves the HTML of the webpage.
+
+    # Parse the HTML content using BeautifulSoup
+    soup = bs4.BeautifulSoup(html, "html.parser")
+
+    # Find all <a> tags with the specified "title" attribute (Yellow Taxi Trip Records).
+    yellow_a_tags = soup.find_all("a", attrs={"title": "Yellow Taxi Trip Records"})
+    
+    # Store all the matching <a> tags (in this case, it's the same as yellow_a_tags).
+    all_a_tags = yellow_a_tags
+
+    # Extract and clean the 'href' attributes for links containing ".parquet".
+    parquet_links = [
+        a["href"].strip() for a in all_a_tags if ".parquet" in (a.get("href") or "")
+    ]
+
+    # Filter the list of links by date (assumes filter_links_by_date() applies date-based filtering).
+    return filter_links_by_date(parquet_links)
+
+#1.2.3 The function to filter required dates for our Project's data
+def filter_links_by_date(links: List[str]) -> List[str]:
+    """
+    Filter Parquet file links by date, retaining only those within the specified range.
+
+    Parameters:
+    links (List[str]): A list of Parquet file URLs to filter.
+
+    Returns:
+    List[str]: A filtered list of links that fall within the specified date range.
+    """
+    filtered_links = []  # Initialize an empty list to store valid links.
+    
+    # Define a regex pattern to extract the year and month from the filename.
+    # Example match: "_2024-03.parquet" captures 2024 as the year and 03 as the month.
+    date_pattern = re.compile(r"_(\d{4})-(\d{2})\.parquet")
+    
+    for link in links:
+        # Search for the date pattern in the link.
+        match = date_pattern.search(link)
+        if match:
+            # Extract the year and month from the matched pattern.
+            year, month = int(match.group(1)), int(match.group(2))
+
+            # Create a datetime object for the extracted date.
+            file_date = datetime(year, month, 1)
+
+            # Check if the file date falls within the global START_DATE and END_DATE range.
+            if START_DATE <= file_date <= END_DATE:
+                # Add the link to the filtered list if it meets the criteria.
+                filtered_links.append(link)
+    
+   
+    return filtered_links
+
+#1.2.4 In our project we are working on the data from Jan/01/2020 till Aug/31/2024
+TAXI_URL: str = "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page"
+
+# Date range for filtering
+START_DATE = datetime(2020, 1, 1)
+END_DATE = datetime(2024, 8, 30)
+
+#1.2.5 Function to Download the Yellow Taxi Data one time. If there is folder and data, this function will skip downloading for next time
+def download_files(links: List[str], folder_name: str) -> None:
+    """Download files from a list of links and save them to the specified folder."""
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+        
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"}
+    
+    for link in links:
+        file_name = link.split("/")[-1]
+        file_path = os.path.join(folder_name, file_name)
+        print(f"Downloading {file_name} from {link}...")
+        if os.path.exists(file_path):
+            print(f"File {file_name} already exists. Skipping download.")
+            continue  # Skip to the next file if it already exists
+        
+        print(f"Downloading {file_name} from {link}...")
+        
+        # Request with headers to mimic a browser
+        response = requests.get(link, headers=headers)
+        response.raise_for_status()  # Check if download was successful
+        
+        with open(file_path, "wb") as file:
+            file.write(response.content)
+        print(f"Downloaded {file_name}")
+
+#1.2.6 Downloading the Yellow Taxi Parquet files¶
+# Find and download filtered links
+filtered_links =find_taxi_parquet_links()
+download_files(filtered_links, "yellow_taxi")
+
+#1.2.7 Sampling the Yellow Taxi Parquet Files¶
+#1.2.7.1 Creating and checking the folder which will include the Sampled Yellow Taxi parquets.
+folder_path = r"./yellow_taxi"
+sample_folder_path = r"./Sample Yellow Taxi"
+
+# Function to create folder if it doesn't exist
+def create_folder_if_not_exists(folder_path: str) -> None:
+    """
+    Create a folder if it does not already exist.
+
+    Parameters:
+    folder_path (str): The path of the folder to create.
+
+    Returns:
+    None
+    """
+    # Check if the folder exists using os.path.exists.
+    if not os.path.exists(folder_path):
+        # If the folder does not exist, create it using os.makedirs.
+        os.makedirs(folder_path)  
+        print(f"Folder created: {folder_path}")  # Notify that the folder was created.
+    else:
+        
+        print(f"Folder already exists: {folder_path}")
+
+#1.2.7.2 The Function to sample each month parquet file based on the Cochran's Sample size formula. In this project, I assume that confidence level of sample is 0.99 and margin of error is 0.05¶
+def process_and_sample_file(file_path: str, sample_folder_path: str):
+    """Read a Parquet file, calculate sample size, and save sampled data to a new file."""
+    file_name = os.path.basename(file_path)
+    sample_file_name = f"sampled_{file_name}"
+    sample_file_path = os.path.join(sample_folder_path, sample_file_name)
+
+    # Check if the sample file already exists
+    if os.path.exists(sample_file_path):
+        print(f"Sample file {sample_file_name} already exists. Skipping this file.")
+        return
+
+    # Read the Parquet file
+    month_data = pd.read_parquet(file_path)
+
+    # Get the population size
+    population_size = len(month_data)
+
+    # Calculate the sample size
+    sample_size = calculate_sample_size(population_size, confidence_level=0.99, margin_of_error=0.05)
+
+    # Sample the data
+    sampled_data = month_data.sample(n=sample_size, random_state=42)  # Ensure reproducibility
+
+    # Save the sampled data to a new Parquet file
+    sampled_data.to_parquet(sample_file_path)
+
+    # Print the results for the file
+    print(f"File: {file_name}")
+    print(f"Population size: {population_size}")
+    print(f"Sample size: {sample_size}")
+    print(f"Sampled data saved to: {sample_file_path}")
+    print("-" * 40)
+
+#1.2.7.3 Downloading the Each month's parquet file of Sample Yellow Taxi
+create_folder_if_not_exists(sample_folder_path)
+
+
+for file_name in os.listdir(folder_path):
+    if file_name.endswith(".parquet"):  # Process only Parquet files
+        file_path = os.path.join(folder_path, file_name)
+        process_and_sample_file(file_path, sample_folder_path)
