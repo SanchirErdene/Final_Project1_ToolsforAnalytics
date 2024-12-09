@@ -912,3 +912,577 @@ filtered_coordin_uber_data.info()
 filtered_coordin_uber_data.describe()
 uber_data.describe()
 
+#1.6 Processing Weather Data¶
+directory = WEATHER_CSV_DIR
+output_directory = WEATHER_CSV_DIR
+
+def get_all_weather_csvs(directory: str) -> List[str]:
+    """
+    Given a directory path, this function returns a list of paths to all CSV files in the directory.
+    
+    Args:
+        directory (str): The path to the directory where the CSV files are located.
+        
+    Returns:
+        List[str]: A list of file paths to all CSV files in the directory.
+    """
+    # Ensure the directory exists
+    if not os.path.isdir(directory):
+        raise ValueError(f"The provided path is not a valid directory: {directory}")
+
+    #read the csv file without cleaned and sunrise
+    csv_files = [f for f in os.listdir(directory) if f.endswith('.csv') and os.path.isfile(os.path.join(directory, f)) and 'cleaned' not in f and 'sunset' not in f]
+
+    # Return the full path to each CSV file
+    return [os.path.join(directory, f) for f in csv_files]
+
+get_all_weather_csvs(directory)
+def clean_month_weather_data_hourly(csv_file: str, output_directory: str) -> None:
+    # read the CSV file
+    df = pd.read_csv(csv_file)
+
+    # Ensure the "DATE" column is in datetime format
+    df['DATE'] = pd.to_datetime(df['DATE'])
+
+    # extract date and hour from the "DATE" column to prepare for group
+    df['DateOnly'] = df['DATE'].dt.date
+    df['Hour'] = df['DATE'].dt.hour
+
+    # Populate all entries of the same date with the existing entry under "DailySnowfall"
+    df['DailySnowfall'] = df.groupby('DateOnly')['DailySnowfall'].transform('first')
+
+    # Fill any T entries and NaN values in "DailySnowfall" with 0
+    df['DailySnowfall'].replace(['T', '', None], 0, inplace=True)
+
+    # Replace empty or "T" entries in "HourlyPrecipitation" and "HourlyWindSpeed" with 0
+    df['HourlyPrecipitation'].replace(['T', '', None], 0, inplace=True)
+    df['HourlyWindSpeed'].replace(['T', '', None], 0, inplace=True)
+
+    # Convert "HourlyPrecipitation" and "HourlyWindSpeed" to numeric values
+    df['HourlyPrecipitation'] = pd.to_numeric(df['HourlyPrecipitation'], errors='coerce').fillna(0)
+    df['HourlyWindSpeed'] = pd.to_numeric(df['HourlyWindSpeed'], errors='coerce').fillna(0)
+
+    # For each hour, retain only the row with the maximum value for "HourlyPrecipitation" and "HourlyWindSpeed"
+    df_cleaned = df.groupby(['DateOnly', 'Hour'], as_index=False).agg({
+        'HourlyPrecipitation': 'max',
+        'HourlyWindSpeed': 'max',
+        'DailySnowfall': 'first'  # This is safe since it's the same for all rows within the same DateOnly
+    })
+
+    # Keep the original DATE column by merging it with the cleaned data
+    df_cleaned = pd.merge(df_cleaned, df[['DateOnly', 'Hour', 'DATE']], on=['DateOnly', 'Hour'], how='left')
+
+    df_cleaned.columns = df_cleaned.columns.str.lower()
+    
+    # Generate a new CSV file with the cleaned data
+    output_filename = csv_file.replace('.csv', '_cleaned.csv')
+    df_cleaned.to_csv(output_filename, index=False)
+    print(f"Cleaned data saved to {output_filename}")
+
+# create cleaned files seperately:
+input_directory = WEATHER_CSV_DIR
+output_directory = input_directory  # Folder where the cleaned files will be saved
+
+# Get all CSV files in the folder
+csv_files = get_all_weather_csvs(input_directory)
+
+# Check if multiple files are found
+if len(csv_files) == 0:
+    print("No CSV files found in the directory.")
+else:
+    # Process each CSV file
+    for csv_file in csv_files:
+        print(f"Processing file: {csv_file}")  # Debug: show which file is being processed
+        cleaned_data = clean_month_weather_data_hourly(csv_file, output_directory)
+
+        # Optionally, print the cleaned data to verify
+        print(f"Cleaned data saved for: {csv_file}")
+
+#Merges all CSV files in the input directory that start with 'cleaned' into one CSV file
+def merge_cleaned_files(input_directory: str, output_filename: str) -> None:
+    # Get all CSV files in the directory that start with "cleaned"
+    cleaned_csv_files = [f for f in os.listdir(input_directory) if  f.endswith('cleaned.csv')]
+    
+    # Check if we found any files
+    if not cleaned_csv_files:
+        print(f"No CSV files found in {input_directory} that start with 'cleaned'.")
+        return
+
+    # Initialize a list to hold all DataFrames
+    all_cleaned_data = []
+
+    # Read each cleaned file and append it to the list
+    for cleaned_csv_file in cleaned_csv_files:
+        file_path = os.path.join(input_directory, cleaned_csv_file)
+        print(f"Reading file: {file_path}")  # Debug: show which file is being processed
+        
+        # Read the CSV file into a DataFrame
+        cleaned_data = pd.read_csv(file_path)
+        
+        # Append the DataFrame to the list
+        all_cleaned_data.append(cleaned_data)
+
+    # Merge all the DataFrames into one
+    merged_data = pd.concat(all_cleaned_data, ignore_index=True)
+
+    # Define the output file path
+    output_file_path = os.path.join(input_directory, output_filename)
+
+    # Save the merged DataFrame to a new CSV file
+    merged_data.to_csv(output_file_path, index=False)
+    
+    # Debug: Confirm the merged file is saved
+    print(f"All cleaned data merged and saved to: {output_file_path}")
+
+input_directory = WEATHER_CSV_DIR
+output_filename = "cleaned_weather_data_hourly.csv"
+merge_cleaned_files(input_directory, output_filename)
+
+def clean_month_weather_data_daily(csv_file : str) -> None:
+    # Load the data from the provided CSV file (hourly)
+    df = pd.read_csv(csv_file)
+    
+    # Define a function to calculate DailySnowfall: If any "T" exists, return "T", else return the mean of the column
+    def new_daily_snowfall(group: pd.Series) -> Union[float, str]:
+        if 'T' in group.values:  # Check if any "T" exists in the group (There shouldn't be any because I already replaced them with 0 before)
+            return 'T'
+        else:
+            numeric_values = pd.to_numeric(group, errors='coerce')  # Convert to numeric, invalid parsing will become NaN
+            return numeric_values.mean()  # Calculate the mean for numeric values
+    
+    # Group the data by 'DateOnly' and apply the custom function for DailySnowfall
+    daily_data = df.groupby('dateonly').agg({
+        'hourlyprecipitation': 'sum',
+        'hourlywindspeed': 'mean',
+        'dailysnowfall': 'mean'
+    }).reset_index()  # Reset the index to make 'DateOnly' a column again
+
+    daily_data = daily_data.rename(columns={
+        'hourlyprecipitation': 'dailyprecipitationtotal',
+        'hourlywindspeed': 'dailywindspeedaverage'
+    })
+
+    # Save the cleaned data to a new CSV file
+    output_file = r'./raw_weather_data/cleaned_weather_data_daily.csv'
+    daily_data.to_csv(output_file, index=False)
+    
+    print(f"Cleaned data saved to: {output_file}")
+
+csv_file_path = r'./raw_weather_data/cleaned_weather_data_hourly.csv'
+
+# Call the function to clean the data
+clean_month_weather_data_daily(csv_file_path)
+
+hourly_data = pd.read_csv(r'./raw_weather_data/cleaned_weather_data_hourly.csv')
+hourly_data.head()
+hourly_data.info()
+hourly_data.describe()
+daily_data = pd.read_csv(r'./raw_weather_data/cleaned_weather_data_daily.csv')
+daily_data.head()
+daily_data.info()
+daily_data.describe()
+
+# Part 2: Storing Cleaned Data
+engine = db.create_engine(DATABASE_URL)
+# Create the Schema for our 4 table
+TAXI_TRIPS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS taxi_trips (
+    taxitripid INTEGER PRIMARY KEY AUTOINCREMENT,
+    pickup_datetime DATETIME,
+    dropoff_datetime DATETIME,
+    trip_distance FLOAT,
+    base_fare FLOAT,
+    tolls FLOAT,
+    taxes FLOAT,
+    all_surcharges FLOAT,
+    tips FLOAT,
+    pickup_lat FLOAT,
+    pickup_lon FLOAT,
+    dropoff_lat FLOAT,
+    dropoff_lon FLOAT,
+    total_fare FLOAT,
+);
+"""
+
+UBER_TRIPS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS uber_trips (
+    ubertripid INTEGER PRIMARY KEY AUTOINCREMENT,
+    pickup_datetime DATETIME,
+    dropoff_datetime DATETIME,
+    trip_distance FLOAT,
+    base_fare FLOAT,
+    tolls FLOAT,
+    taxes FLOAT,
+    all_surcharges FLOAT,
+    tips FLOAT,
+    pickup_lat FLOAT,
+    pickup_lon FLOAT,
+    dropoff_lat FLOAT,
+    dropoff_lon FLOAT,
+    total_fare FLOAT,
+);
+"""
+HOURLY_WEATHER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS hourly_weather(
+    hourlyid INTEGER PRIMARY KEY AUTOINCREMENT,
+    dateonly DATETIME,
+    hour INTEGER,
+    hourlyprecipitation FLOAT,
+    hourlywindspeed FLOAT,
+    dailysnowfall FLOAT,
+    date DATETIME,
+)
+"""
+
+DAILY_WEATHER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS daily_weather(
+    dailyid INTEGER PRIMARY KEY AUTOINCREMENT,
+    dateonly DATETIME,
+    dailyprecipitationtotal FLOAT,
+    dailywindspeedaverage FLOAT,
+    dailysnowfall FLOAT,
+)
+"""
+
+# create that required schema.sql file
+with open(DATABASE_SCHEMA_FILE, "w") as f:
+    f.write(HOURLY_WEATHER_SCHEMA)
+    f.write(DAILY_WEATHER_SCHEMA)
+    f.write(TAXI_TRIPS_SCHEMA)
+    f.write(UBER_TRIPS_SCHEMA)
+
+# create the tables with the schema files
+with engine.connect() as connection:
+    pass
+
+# Add Data to Database
+def write_dataframes_to_table(table_to_df_dict, database_path="project.db"):
+    """
+    Writes dataframes to the respective tables in the SQLite database.
+
+    Parameters:
+    - table_to_df_dict (dict): A dictionary mapping table names to their corresponding DataFrames.
+    - database_path (str): The path to the SQLite database file.
+
+    Returns:
+    None
+    """
+    # Connect to SQLite database
+    with sqlite3.connect(database_path) as conn:
+        cursor = conn.cursor()
+        
+        for table_name, df in table_to_df_dict.items():
+            # Write DataFrame to SQLite table
+            try:
+                print(f"Writing data to table {table_name}...")
+                df.to_sql(table_name, conn, if_exists="replace", index=False)
+                print(f"Data successfully written to table {table_name}.")
+            except Exception as e:
+                print(f"Error writing to table {table_name}: {e}")
+                raise
+
+# Adding the data into our schema
+map_table_name_to_dataframe = {
+    "taxi_trips": filtered_taxi_data,
+    "uber_trips": filtered_coordin_uber_data,
+    "hourly_weather": hourly_data,
+    "daily_weather":daily_data   
+}
+
+write_dataframes_to_table(map_table_name_to_dataframe)
+
+# Part 3: Understanding the Data
+
+def write_query_to_file(query, outfile):
+    """
+    Writes a given SQL query to a file.
+
+    Parameters:
+    - query (str): The SQL query string to be written to the file.
+    - outfile (str): The path to the file where the query will be written.
+
+    Returns:
+    - None
+    """
+    try:
+        with open(outfile, "w") as file:
+            file.write(query)
+        print(f"Query successfully written to {outfile}.")
+    except Exception as e:
+        print(f"Failed to write query to file: {e}")
+        raise
+
+# 3.1 Query 1 What’s the most popular hour to take a taxi?¶
+
+QUERY_1_FILENAME = """most_populat_hourt_to_take_taxi"""
+
+QUERY_1 = """
+    SELECT 
+        strftime('%H', pickup_datetime) AS hour,
+        COUNT(*) AS ride_count
+    FROM 
+        taxi_trips
+    WHERE 
+        pickup_datetime 
+    GROUP BY 
+        hour
+    ORDER BY 
+        ride_count DESC;
+"""
+
+# execute query either via sqlalchemy
+with engine.connect() as con:
+    results = con.execute(db.text(QUERY_1)).fetchall()
+results
+
+pd.read_sql(QUERY_1, con=engine)
+
+write_query_to_file(QUERY_1, QUERY_1_FILENAME)
+
+# Query2 What’s the most popular day of the week to take an Uber?¶
+
+QUERY_2_FILENAME = """popular_day_of_week_to_take_uber"""
+
+QUERY_2 = """
+SELECT 
+    strftime('%w', pickup_datetime) AS day_of_week,
+    CASE strftime('%w', pickup_datetime)
+        WHEN '0' THEN 'Sunday'
+        WHEN '1' THEN 'Monday'
+        WHEN '2' THEN 'Tuesday'
+        WHEN '3' THEN 'Wednesday'
+        WHEN '4' THEN 'Thursday'
+        WHEN '5' THEN 'Friday'
+        WHEN '6' THEN 'Saturday'
+    END AS day_name,
+    COUNT(*) AS ride_count
+FROM uber_trips
+WHERE pickup_datetime BETWEEN '2020-01-01' AND '2024-08-31'
+GROUP BY day_of_week
+ORDER BY ride_count DESC;
+"""
+
+with engine.connect() as con:
+    results = con.execute(db.text(QUERY_2)).fetchall()
+results
+
+pd.read_sql(QUERY_2, con=engine)
+
+write_query_to_file(QUERY_2, QUERY_2_FILENAME)
+
+# Query3: What’s the 95% percentile of trip distance in January 2024?
+QUERY_3_FILENAME = """95% percentile of trip distance"""
+
+QUERY_3 = """
+WITH ranked_trips AS (
+    SELECT 
+        trip_distance,
+        ROW_NUMBER() OVER (ORDER BY trip_distance) AS row_num,
+        COUNT(*) OVER () AS total_rows
+    FROM (
+        SELECT 
+            trip_distance,
+            pickup_datetime AS pickup_datetime
+        FROM 
+            taxi_trips
+        WHERE 
+            pickup_datetime >= '2024-01-01' 
+            AND pickup_datetime < '2024-02-01'
+
+        UNION ALL
+
+        SELECT 
+            trip_distance,
+            pickup_datetime
+        FROM 
+            uber_trips
+        WHERE 
+            pickup_datetime >= '2024-01-01' 
+            AND pickup_datetime < '2024-02-01'
+    ) AS combined_trips
+)
+SELECT 
+    trip_distance
+FROM 
+    ranked_trips
+WHERE 
+    row_num = CAST(0.95 * total_rows AS INTEGER);
+"""
+
+with engine.connect() as con:
+    results = con.execute(db.text(QUERY_3)).fetchall()
+results
+
+pd.read_sql(QUERY_3, con=engine)
+
+write_query_to_file(QUERY_3, QUERY_3_FILENAME)
+
+# Query 4: What was the weather like for the busiest days in 2023?¶
+
+QUERY_4_FILENAME = "averagedistance_precipitation_windspeed_on_top_10_busiesy_days"
+
+QUERY_4 = """
+WITH combined_trips AS (
+    -- Combine both taxi and Uber trips for 2023
+    SELECT
+        DATE(pickup_datetime) AS trip_date,
+        trip_distance
+    FROM taxi_trips
+    WHERE strftime('%Y', pickup_datetime) = '2023'
+    UNION ALL
+    SELECT
+        DATE(pickup_datetime) AS trip_date,
+        trip_distance AS trip_distance
+    FROM uber_trips
+    WHERE strftime('%Y', pickup_datetime) = '2023'
+),
+daily_ride_summary AS (
+    -- Aggregate the combined trips to get the total rides and average distance per day
+    SELECT
+        trip_date,
+        COUNT(*) AS num_rides,
+        AVG(trip_distance) AS avg_distance
+    FROM combined_trips
+    GROUP BY trip_date
+),
+weather_summary AS (
+    -- Aggregate the daily weather data for 2023
+    SELECT
+        DATE(dateonly) AS weather_date,
+        dailyprecipitationtotal AS avg_precipitation,
+        dailywindspeedaverage AS avg_windspeed
+    FROM daily_weather
+    WHERE strftime('%Y', dateonly) = '2023'
+)
+-- Final result combining ride and weather summaries
+SELECT
+    dtr.trip_date AS date,
+    dtr.num_rides,
+    dtr.avg_distance,
+    ws.avg_precipitation,
+    ws.avg_windspeed
+FROM daily_ride_summary dtr
+JOIN weather_summary ws ON dtr.trip_date = ws.weather_date
+ORDER BY dtr.num_rides DESC
+LIMIT 10;
+"""
+
+# execute query either via sqlalchemy
+with engine.connect() as con:
+    results = con.execute(db.text(QUERY_4)).fetchall()
+results
+
+write_query_to_file(QUERY_4, QUERY_4_FILENAME)
+
+# Query 5: How many rides were hired during snow days?¶
+
+QUERY_5_FILENAME = "top_10_snowest_days_and_trip_amounts"
+
+QUERY_5 = """
+WITH combined_trips AS (
+    -- Combine both taxi and Uber trips from January 2020 to August 2024
+    SELECT
+        DATE(pickup_datetime) AS trip_date
+    FROM taxi_trips
+    WHERE DATE(pickup_datetime) BETWEEN '2020-01-01' AND '2024-08-31'
+    UNION ALL
+    SELECT
+        DATE(pickup_datetime) AS trip_date
+    FROM uber_trips
+    WHERE DATE(pickup_datetime) BETWEEN '2020-01-01' AND '2024-08-31'
+),
+daily_ride_summary AS (
+    -- Aggregate the combined trips to get the total number of hired trips per day
+    SELECT
+        trip_date,
+        COUNT(*) AS num_rides
+    FROM combined_trips
+    GROUP BY trip_date
+),
+weather_summary AS (
+    -- Select daily snowfall data from the weather table
+    SELECT
+        DATE(dateonly) AS weather_date,
+        dailysnowfall AS total_snowfall
+    FROM daily_weather
+    WHERE DATE(dateonly) BETWEEN '2020-01-01' AND '2024-08-31'
+)
+-- Final result combining ride and weather summaries
+SELECT
+    dtr.trip_date AS date,
+    ws.total_snowfall,
+    dtr.num_rides
+FROM daily_ride_summary dtr
+JOIN weather_summary ws ON dtr.trip_date = ws.weather_date
+ORDER BY ws.total_snowfall DESC
+LIMIT 10;
+"""
+
+# execute query either via sqlalchemy
+with engine.connect() as con:
+    results = con.execute(db.text(QUERY_5)).fetchall()
+results
+
+write_query_to_file(QUERY_5, QUERY_5_FILENAME)
+
+# Query 6: How was the ride, precipitation and sustained wind speed?¶¶
+
+QUERY_6_FILENAME = "hourly_rides_precipitation_and_windspeed_during_the_storm"
+QUERY_6 = """
+WITH 
+-- Generate a list of all hours for the given date range (September 25 - October 3, 2023)
+hour_list AS (
+    WITH RECURSIVE
+    hours(date_hour, hour_num) AS (
+        -- Initial hour (starting from '2023-09-25 00:00:00')
+        SELECT '2023-09-25 00:00:00', 0
+        UNION ALL
+        -- Generate the next hour
+        SELECT strftime('%Y-%m-%d %H:00:00', date_hour, '+1 hour'), hour_num + 1
+        FROM hours
+        WHERE date_hour < '2023-10-03 23:00:00'
+    )
+    SELECT date_hour FROM hours
+),
+
+-- Combine taxi and uber trips within the date range (September 25 - October 3, 2023)
+trip_data AS (
+    SELECT 
+        strftime('%Y-%m-%d %H:00:00', pickup_datetime) AS date_hour,
+        COUNT(*) AS num_trips
+    FROM (
+        SELECT pickup_datetime FROM taxi_trips WHERE pickup_datetime BETWEEN '2023-09-25' AND '2023-10-03'
+        UNION ALL
+        SELECT pickup_datetime FROM uber_trips WHERE pickup_datetime BETWEEN '2023-09-25' AND '2023-10-03'
+    )
+    GROUP BY date_hour
+),
+
+-- Get hourly weather data for the given date range
+weather_data AS (
+    SELECT 
+        strftime('%Y-%m-%d %H:00:00', dateonly || ' ' || hour || ':00:00') AS date_hour,
+        SUM(hourlyprecipitation) AS total_precipitation,
+        AVG(hourlywindspeed) AS avg_wind_speed
+    FROM hourly_weather
+    WHERE dateonly BETWEEN '2023-09-25' AND '2023-10-03'
+    GROUP BY date_hour
+)
+
+-- Join all hours with trip and weather data
+SELECT 
+    hl.date_hour,
+    COALESCE(td.num_trips, 0) AS num_trips, 
+    COALESCE(wd.total_precipitation, 0.0) AS total_precipitation, 
+    COALESCE(wd.avg_wind_speed, 0.0) AS avg_wind_speed
+FROM hour_list hl
+LEFT JOIN trip_data td ON hl.date_hour = td.date_hour
+LEFT JOIN weather_data wd ON hl.date_hour = wd.date_hour
+ORDER BY hl.date_hour;
+"""
+
+with engine.connect() as con:
+    results = con.execute(db.text(QUERY_6)).fetchall()
+results
+
+write_query_to_file(QUERY_6, QUERY_6_FILENAME)
